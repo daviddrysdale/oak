@@ -70,6 +70,30 @@ void lots_of_replies(HelloWorld::Stub* stub, std::string name) {
   }
 }
 
+void lots_of_greetings(HelloWorld::Stub* stub, const std::vector<std::string>& names) {
+  grpc::ClientContext context;
+  HelloResponse response;
+  std::unique_ptr<grpc::ClientWriter<HelloRequest>> writer(stub->LotsOfGreetings(&context, &response));
+
+  for (const auto& name: names) {
+    HelloRequest request;
+    request.set_greeting(name);
+    LOG(INFO) << "Streaming Request: " << request.greeting();
+    if (!writer->Write(request)) {
+      // Broken stream.
+      break;
+    }
+  }
+  writer->WritesDone();
+  grpc::Status status = writer->Finish();
+  if (status.ok()) {
+    LOG(WARNING) << "Could not call LotsOfGreetings(): " << status.error_code() << ": "
+                 << status.error_message();
+    return;
+  }
+  LOG(INFO) << "Response: " << response.reply();
+}
+
 int main(int argc, char** argv) {
   absl::ParseCommandLine(argc, argv);
 
@@ -126,6 +150,7 @@ int main(int argc, char** argv) {
   say_hello(stub.get(), "MONDE");
 
   lots_of_replies(stub.get(), "WORLDS");
+  lots_of_greetings(stub.get(), {"world", "mondo", "monde"});
 
   // Request termination of the Oak Application.
   LOG(INFO) << "Terminating application id=" << application_id;
