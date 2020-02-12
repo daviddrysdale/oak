@@ -83,6 +83,7 @@ void lots_of_greetings(HelloWorld::Stub* stub, const std::vector<std::string>& n
       // Broken stream.
       break;
     }
+    sleep(2);
   }
   writer->WritesDone();
   grpc::Status status = writer->Finish();
@@ -143,6 +144,7 @@ int main(int argc, char** argv) {
   auto stub = HelloWorld::NewStub(oak::ApplicationClient::CreateChannel(addr.str()));
 
   // Perform multiple invocations of the same Oak Application, with different parameters.
+  /*
   say_hello(stub.get(), "WORLD");
   say_hello(stub.get(), "MONDO");
   say_hello(stub.get(), "世界");
@@ -150,6 +152,7 @@ int main(int argc, char** argv) {
   say_hello(stub.get(), "MONDE");
 
   lots_of_replies(stub.get(), "WORLDS");
+  */
   lots_of_greetings(stub.get(), {"world", "mondo", "monde"});
 
   // Request termination of the Oak Application.
