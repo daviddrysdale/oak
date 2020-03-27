@@ -140,6 +140,10 @@ impl OakABITestService for FrontendNode {
             FrontendNode::test_channel_wait_orphan,
         );
         tests.insert("NodeCreate", FrontendNode::test_node_create);
+        tests.insert(
+            "NodeCreateEphemeral",
+            FrontendNode::test_node_create_ephemeral,
+        );
         tests.insert("NodeCreateRaw", FrontendNode::test_node_create_raw);
         tests.insert("RandomGetRaw", FrontendNode::test_random_get_raw);
         tests.insert("RandomGet", FrontendNode::test_random_get);
@@ -1069,6 +1073,34 @@ impl FrontendNode {
 
         expect_eq!(Ok(()), oak::channel_close(in_handle.handle));
         expect_eq!(Ok(()), oak::channel_close(out_handle.handle));
+        Ok(())
+    }
+
+    fn test_node_create_ephemeral(&mut self) -> TestResult {
+        let (out_handle, in_handle) = oak::channel_create().unwrap();
+        expect_eq!(
+            Ok(()),
+            oak::node_create(BACKEND_CONFIG_NAME, "backend_ephemeral_main", in_handle)
+        );
+        expect_eq!(Ok(()), oak::channel_close(in_handle.handle));
+
+        // Hacky attempt to give the ephemeral node a chance to run and
+        // terminate.
+        // TODO(#350): when some sort of time is available, use a
+        // synchronize-via-sleep instead.
+        let mut data = [0; 1024];
+        oak::random_get(&mut data).unwrap();
+
+        // Once the ephemeral remote Node has had a chance to start and immediately
+        // terminate, then the channel to it should now be orphaned.
+        let data = vec![0x01, 0x02, 0x03];
+        expect_eq!(
+            Err(OakStatus::ErrChannelClosed),
+            oak::channel_write(out_handle, &data, &[])
+        );
+
+        expect_eq!(Ok(()), oak::channel_close(out_handle.handle));
+
         Ok(())
     }
 

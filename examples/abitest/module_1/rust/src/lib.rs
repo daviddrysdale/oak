@@ -149,3 +149,7 @@ fn inner_main(in_handle: u64) -> Result<(), oak::OakStatus> {
 pub extern "C" fn backend_fake_main(_handle: u64, _another: u64) {
     panic!("reached backend_fake_main!");
 }
+
+// Exported entrypoint that immediately terminates, just for testing.
+#[no_mangle]
+pub extern "C" fn backend_ephemeral_main(_handle: u64) {}
