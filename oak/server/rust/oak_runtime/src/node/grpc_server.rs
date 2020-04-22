@@ -14,7 +14,11 @@
 // limitations under the License.
 //
 
+use crate::{metrics::METRICS, pretty_name_for_thread, runtime::RuntimeProxy};
 use log::{error, info, warn};
+use oak_abi::{
+    grpc::encap_request, label::Label, proto::oak::encap::GrpcRequest, ChannelReadStatus, OakStatus,
+};
 use prost::Message;
 use prost_types::Any;
 use std::{
@@ -22,12 +26,6 @@ use std::{
     net::SocketAddr,
     thread::{self, JoinHandle},
 };
-
-use oak_abi::{
-    grpc::encap_request, label::Label, proto::oak::encap::GrpcRequest, ChannelReadStatus, OakStatus,
-};
-
-use crate::{metrics::METRICS, pretty_name_for_thread, runtime::RuntimeProxy, Handle};
 
 /// Struct that represents a gRPC server pseudo-Node.
 ///
@@ -46,9 +44,9 @@ pub struct GrpcServerNode {
     address: SocketAddr,
     /// Channel handle used for reading a [`GrpcServerNode::channel_writer`] once the gRPC server
     /// pseudo-Node has started.
-    initial_reader: Handle,
+    initial_reader: oak_abi::Handle,
     /// Channel handle used for writing invocations.
-    channel_writer: Option<Handle>,
+    channel_writer: Option<oak_abi::Handle>,
 }
 
 #[derive(Debug)]
@@ -97,7 +95,7 @@ impl GrpcServerNode {
         config_name: &str,
         runtime: RuntimeProxy,
         address: SocketAddr,
-        initial_reader: Handle,
+        initial_reader: oak_abi::Handle,
     ) -> Self {
         Self {
             config_name: config_name.to_string(),
@@ -111,7 +109,7 @@ impl GrpcServerNode {
     /// Reads a [`Handle`] from a channel specified by [`GrpcServerNode::initial_reader`].
     /// Returns an error if couldn't read from the channel or if received a wrong number of handles
     /// (not equal to 1).
-    fn init_channel_writer(&self) -> Result<Handle, OakStatus> {
+    fn init_channel_writer(&self) -> Result<oak_abi::Handle, OakStatus> {
         let read_status = self
             .runtime
             .wait_on_channels(&[self.initial_reader])
@@ -134,12 +132,12 @@ impl GrpcServerNode {
                             OakStatus::ErrInternal
                         })
                         .and_then(|m| {
-                            if m.channels.len() == 1 {
-                                Ok(m.channels[0])
+                            if m.handles.len() == 1 {
+                                Ok(m.handles[0])
                             } else {
                                 error!(
                                     "gRPC server pseudo-node should receive a single `writer` handle, found {}",
-                                    m.channels.len()
+                                    m.handles.len()
                                 );
                                 Err(OakStatus::ErrInternal)
                             }
@@ -207,7 +205,7 @@ impl GrpcServerNode {
     /// Processes a gRPC request, forwards it to a temporary channel and sends handles for this
     /// channel to the [`GrpcServerNode::channel_writer`].
     /// Returns a [`Handle`] for reading a gRPC response from.
-    fn process_request(&self, request: GrpcRequest) -> Result<Handle, GrpcServerError> {
+    fn process_request(&self, request: GrpcRequest) -> Result<oak_abi::Handle, GrpcServerError> {
         // Create a pair of temporary channels to pass the gRPC request and to receive the response.
         let (request_writer, request_reader) =
             self.runtime.channel_create(&Label::public_trusted());
@@ -218,15 +216,15 @@ impl GrpcServerNode {
         //
         // This message should be in sync with the [`oak::grpc::Invocation`] from the Oak SDK:
         // the order of the `request_reader` and `response_writer` must be consistent.
-        let invocation = crate::Message {
+        let invocation = crate::NodeMessage {
             data: vec![],
-            channels: vec![request_reader, response_writer],
+            handles: vec![request_reader, response_writer],
         };
 
         // Serialize gRPC request into a message.
-        let mut message = crate::Message {
+        let mut message = crate::NodeMessage {
             data: vec![],
-            channels: vec![],
+            handles: vec![],
         };
         request.encode(&mut message.data).map_err(|error| {
             error!("Couldn't serialize a GrpcRequest message: {}", error);
@@ -260,7 +258,10 @@ impl GrpcServerNode {
 
     /// Processes a gRPC response from a channel represented by `response_reader` and returns an
     /// HTTP response body.
-    fn process_response(&self, response_reader: Handle) -> Result<Vec<u8>, GrpcServerError> {
+    fn process_response(
+        &self,
+        response_reader: oak_abi::Handle,
+    ) -> Result<Vec<u8>, GrpcServerError> {
         let read_status = self
             .runtime
             .wait_on_channels(&[response_reader])
