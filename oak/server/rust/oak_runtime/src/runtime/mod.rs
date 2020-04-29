@@ -608,6 +608,9 @@ impl Runtime {
                 error!("could not terminate node: {:?}", err);
             }
         }
+
+        info!("run channel GC on exit");
+        self.run_channel_gc();
     }
 
     /// Enumerate all `Channel` objects that are accessible via ABI handles, or by in-flight

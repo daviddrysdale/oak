@@ -26,7 +26,7 @@ use std::{
     fmt::Write,
     sync::{
         atomic::{AtomicU64, Ordering::SeqCst},
-        Arc, Mutex, RwLock, Weak,
+        Arc, Mutex, RwLock, RwLockWriteGuard, Weak,
     },
     thread::{Thread, ThreadId},
 };
@@ -362,9 +362,7 @@ impl ChannelMapping {
     }
 
     /// Give access to the internals of the channel mapping.
-    pub fn get_channels<'a>(
-        &'a self,
-    ) -> std::sync::RwLockWriteGuard<'a, HashMap<ChannelId, Arc<Channel>>> {
+    pub fn get_channels<'a>(&'a self) -> RwLockWriteGuard<'a, HashMap<ChannelId, Arc<Channel>>> {
         self.channels.write().unwrap()
     }
 

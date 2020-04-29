@@ -95,6 +95,7 @@ void OakGrpcNode::Stop() {
     queue_thread_.join();
     OAK_LOG(INFO) << "{" << name_ << "} Completed queue thread";
   }
+  ChannelClose(handle_);
   // Now there is no separate thread running it's safe to drop the gRPC objects.
   server_ = nullptr;
   completion_queue_ = nullptr;
