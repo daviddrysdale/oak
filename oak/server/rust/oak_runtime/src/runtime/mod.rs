@@ -18,7 +18,7 @@ use crate::{
     message::{Message, NodeMessage},
     metrics::METRICS,
     node, pretty_name_for_thread,
-    runtime::channel::{with_reader_channel, with_writer_channel},
+    runtime::channel::{with_reader_channel, with_writer_channel, ChannelId},
 };
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering::SeqCst};
 use itertools::Itertools;
@@ -26,7 +26,7 @@ use log::{debug, error, info, trace};
 use oak_abi::{label::Label, ChannelReadStatus, OakStatus};
 use rand::RngCore;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fmt::Write,
     string::String,
     sync::{Arc, Mutex, RwLock},
@@ -608,6 +608,34 @@ impl Runtime {
                 error!("could not terminate node: {:?}", err);
             }
         }
+    }
+
+    /// Enumerate all `Channel` objects that are accessible via ABI handles, or by in-flight
+    /// messages from accessible `Chanel` objects, and drop any remaining unvisited `Channel`
+    /// objects.
+    pub fn run_channel_gc(&self) -> String {
+        // Stop the world: hold both the `node_infos` read lock and the `channels.channels` write
+        // locks (in that order).
+        let mut unvisited: HashSet<ChannelId>;
+        {
+            let node_infos = self.node_infos.read().unwrap();
+            let channels = self.channels.get_channels();
+            info!("channel count before GC start: {}", channels.len());
+            unvisited = channels.keys().copied().collect();
+            for node_id in node_infos.keys().sorted() {
+                let node_info = node_infos.get(node_id).unwrap();
+                debug!("visit things accessible from {:?}", node_id);
+                for (handle, half) in &node_info.abi_handles {
+                    debug!(
+                        "  visit {:?}'s ABI handle {} => {:?}",
+                        node_id, handle, half
+                    );
+                    self.channels.visit_half(&mut unvisited, half);
+                }
+            }
+        }
+
+        self.channels.channel_gc(unvisited)
     }
 
     /// Returns a clone of the [`Label`] associated with the provided `node_id`, in order to limit

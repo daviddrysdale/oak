@@ -19,10 +19,10 @@ use crate::{
     runtime::{DotIdentifier, HtmlPath},
 };
 use itertools::Itertools;
-use log::debug;
+use log::{debug, error, info};
 use oak_abi::OakStatus;
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     fmt::Write,
     sync::{
         atomic::{AtomicU64, Ordering::SeqCst},
@@ -193,7 +193,7 @@ pub enum ChannelHalfDirection {
 }
 
 /// An internal identifier to track a [`Channel`].
-type ChannelId = u64;
+pub type ChannelId = u64;
 
 impl DotIdentifier for ChannelId {
     fn dot_id(&self) -> String {
@@ -361,6 +361,13 @@ impl ChannelMapping {
         }
     }
 
+    /// Give access to the internals of the channel mapping.
+    pub fn get_channels<'a>(
+        &'a self,
+    ) -> std::sync::RwLockWriteGuard<'a, HashMap<ChannelId, Arc<Channel>>> {
+        self.channels.write().unwrap()
+    }
+
     /// Creates a new [`Channel`] and returns a `(writer half, reader half)` pair.
     pub fn new_channel(&self, label: &oak_abi::label::Label) -> (ChannelHalf, ChannelHalf) {
         let channel_id = self.next_channel_id.fetch_add(1, SeqCst);
@@ -428,6 +435,57 @@ impl ChannelMapping {
         {
             channel.wake_waiters();
         }
+    }
+
+    // Visit the `Channel` referenced by a `ChannelHalf`, updating the given set of
+    // as-yet unvisited `ChannelId` values.
+    pub fn visit_half(&self, unvisited: &mut HashSet<ChannelId>, half: &ChannelHalf) {
+        let channel_id = half.channel.id;
+        if !unvisited.contains(&channel_id) {
+            debug!("    already visited {}, move on", channel_id);
+            return;
+        }
+        debug!("    visit {}, check its messages", channel_id);
+        unvisited.remove(&channel_id);
+
+        // Recurse: visit all `ChannelHalf` objects that are accessible from the messages
+        // held in this channel.
+        for msg in half.channel.messages.read().unwrap().iter() {
+            for half in &msg.channels {
+                self.visit_half(unvisited, half);
+            }
+        }
+    }
+
+    pub fn channel_gc(&self, unvisited: HashSet<ChannelId>) -> String {
+        let mut s = "<h2>Channel GC Result</h2>".to_string();
+        let mut channels = self.channels.write().unwrap();
+        for channel_id in unvisited {
+            if let Some(channel) = channels.remove(&channel_id) {
+                debug!(
+                    "drop unreachable channel {:?} with {} Arcs remaining",
+                    channel,
+                    Arc::strong_count(&channel)
+                );
+                write!(&mut s, "<p>Reaped {:?}", channel).unwrap();
+
+                // Perform the same actions as in `drop_half()`, but while
+                // holding the write lock and without bothering to track.
+                // `ChannelHalf` counts
+                channels.remove(&channel.id);
+                {
+                    channel.messages.write().unwrap().clear();
+                }
+                drop(channel); // Be explicit: ref dropped here.
+            } else {
+                error!(
+                    "Channel ID {} marked as unvisited but not present in ChannelMapping!",
+                    channel_id
+                );
+            }
+        }
+        info!("channel count after GC done: {}", channels.len());
+        s
     }
 
     /// Build a Dot nodes stanza for the `ChannelMapping`.
