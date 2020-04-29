@@ -470,7 +470,6 @@ impl ChannelMapping {
                 // Perform the same actions as in `drop_half()`, but while
                 // holding the write lock and without bothering to track.
                 // `ChannelHalf` counts
-                channels.remove(&channel.id);
                 {
                     channel.messages.write().unwrap().clear();
                 }
