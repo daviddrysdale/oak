@@ -24,6 +24,11 @@
 // Forward on to gLog.
 #include "glog/logging.h"
 #define OAK_LOG(severity) COMPACT_GOOGLE_LOG_##severity.stream()
+#define OAK_LOGGING_INIT(name, logtostderr) \
+  {                                         \
+    ::google::InitGoogleLogging(name);      \
+    FLAGS_logtostderr = (int)(logtostderr); \
+  }
 
 #else
 
@@ -48,6 +53,7 @@ inline NullMessage& operator<<(NullMessage& msg, std::ostream& (*)(std::ostream&
 }  // namespace oak
 
 #define OAK_LOG(severity) ::oak::NullMessage().stream()
+#define OAK_LOGGING_INIT(name, logtostderr)
 
 #endif
 
