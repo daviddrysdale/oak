@@ -40,6 +40,7 @@ members = [
 # Oak.
 oak = { path = "sdk/rust/oak" }
 oak_abi = { path = "oak/server/rust/oak_abi" }
+oak_glue = { path = "oak/server/rust/oak_glue" }
 oak_loader = { path = "oak/server/rust/oak_loader" }
 oak_proxy = { path = "oak/server/rust/oak_proxy" }
 oak_runtime = { path = "oak/server/rust/oak_runtime" }

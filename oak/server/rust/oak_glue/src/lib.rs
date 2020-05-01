@@ -16,138 +16,63 @@
 
 use byteorder::{ReadBytesExt, WriteBytesExt};
 use lazy_static::lazy_static;
-use log::{debug, error, info, warn};
+use log::{debug, error, info};
 use oak_abi::OakStatus;
-use oak_runtime::{
-    proto::oak::application::ApplicationConfiguration, runtime::RuntimeProxy, NodeId,
-};
-use prost::Message;
+use oak_runtime::NodeId;
 use std::{convert::TryInto, io::Cursor, sync::RwLock};
 
-#[no_mangle]
-pub extern "C" fn glue_init(debug: u32) {
-    let _ = ::std::panic::catch_unwind(|| {
-        if debug != 0 {
-            simple_logger::init_with_level(log::Level::Debug).expect("failed to initialize logger");
-        }
-        info!("Rust FFI glue initialized");
-    });
-}
+// Functions that are specific to C++ `main` invoking Rust Runtime.
+pub mod cpp_main;
 
+/// `NodeFactory` is the type of a function pointer that the Rust runtime can use
+/// to create a pseudo-Node that is implemented in C++.  The thread that calls
+/// the function pointer is donated to the pseudo-Node.
 type NodeFactory =
     extern "C" fn(data: usize, name: *const u8, name_len: u32, node_id: u64, handle: u64) -> ();
 
-struct Glue {
-    runtime: oak_runtime::RuntimeProxy,
-    factory: Option<NodeFactory>,
-    factory_data: usize,
-}
-
-impl Glue {
-    fn new(
-        runtime: oak_runtime::RuntimeProxy,
-        factory: Option<NodeFactory>,
-        factory_data: usize,
-    ) -> Self {
-        Glue {
-            runtime,
-            factory,
-            factory_data,
-        }
-    }
-}
-
 lazy_static! {
-    static ref GLUE: RwLock<Option<Glue>> = RwLock::new(None);
+    static ref FACTORY: RwLock<Option<(NodeFactory, usize)>> = RwLock::new(None);
 }
 
-const R1: &str = "global glue lock poisoned";
-const R2: &str = "global glue object missing";
+const F1: &str = "global pseudo-Node factory lock poisoned";
+const F2: &str = "global pseudo-Node factory object missing";
 
-/// Recreate a RuntimeProxy instance that corresponds to the given node ID
-/// value.
-fn proxy_for_node(node_id: u64) -> RuntimeProxy {
-    GLUE.read()
-        .expect(R1)
-        .as_ref()
-        .expect(R2)
-        .runtime
-        .new_for_node(NodeId(node_id))
-}
-
-/// Start the Rust runtime, with the ApplicationConfiguration provided in
-/// serialized form.
+/// Register a callback for creating C++ pseudo-Nodes.
 ///
 /// # Safety
 ///
-/// Caller must ensure that the memory range [config_buf, config_buf+config_len) is
-/// accessible and holds a protobuf-serialized ApplicationConfiguration message.
+/// The provided function pointer must be non-NULL and must conform to the
+/// `NodeFactory` function signature.
 #[no_mangle]
-pub unsafe extern "C" fn glue_start(
-    config_buf: *const u8,
-    config_len: u32,
-    factory: Option<NodeFactory>,
+pub unsafe extern "C" fn glue_register_factory(
+    factory: Option<crate::NodeFactory>,
     factory_data: usize,
-    node_id: *mut u64,
-) -> u64 {
-    std::panic::catch_unwind(|| {
-        let config_data = std::slice::from_raw_parts(config_buf, config_len as usize);
-
-        let app_config = match ApplicationConfiguration::decode(config_data) {
-            Ok(c) => c,
-            Err(e) => {
-                error!("Failed to decode ApplicationConfiguration: {}", e);
-                return oak_abi::INVALID_HANDLE;
-            }
-        };
-        let runtime_config = oak_runtime::RuntimeConfiguration {
-            metrics_port: Some(3030),
-            introspect_port: Some(1909),
-        };
-        info!(
-            "start runtime with initial config {}.{} {:?}",
-            app_config.initial_node_config_name, app_config.initial_entrypoint_name, runtime_config
-        );
-
-        // Register callback for creating C++ pseudo-Nodes.
-        oak_runtime::node::external::register_factory(create_and_run_node);
-        info!("register oak_glue::create_and_run_node() as node factory");
-
-        // Configure the Rust Runtime, and run the gRPC server pseudo-Node as the implicit
-        // initial Node.
-        let (grpc_proxy, grpc_handle) =
-            match oak_runtime::configure_and_run(app_config, runtime_config) {
-                Ok(p) => p,
-                Err(status) => {
-                    error!("Failed to start runtime: {:?}", status);
-                    return oak_abi::INVALID_HANDLE;
-                }
-            };
-        *node_id = grpc_proxy.node_id.0;
-        info!(
-            "runtime started, grpc_node_id={}, grpc_handle={}",
-            *node_id, grpc_handle
-        );
-
-        let glue = Glue::new(grpc_proxy, factory, factory_data);
-        *GLUE.write().expect(R1) = Some(glue);
-        grpc_handle
-    })
-    .unwrap_or(oak_abi::INVALID_HANDLE)
+) {
+    *FACTORY.write().expect(F1) = Some((factory.expect(F2), factory_data));
+    oak_runtime::node::external::register_factory(create_and_run_node);
+    info!("register oak_glue::cpp_main::create_and_run_node() as node factory");
 }
 
-/// Stop the Rust runtime.
-#[no_mangle]
-pub extern "C" fn glue_stop() {
-    let mut glue = GLUE.write().expect(R1);
+/// Method to provide a Rust-compatible wrapper around the registered C++ pseudo-Node
+/// factory callback function pointer.
+fn create_and_run_node(config_name: &str, node_id: NodeId, handle: oak_abi::Handle) {
     info!(
-        "runtime graph at exit:\n\n{}",
-        glue.as_ref().expect(R2).runtime.graph_runtime()
+        "invoke registered factory with '{}', node_id={:?}, handle={}",
+        config_name, node_id, handle
     );
-    warn!("stopping Rust runtime");
-    glue.as_ref().expect(R2).runtime.stop_runtime();
-    *glue = None;
+    let factory_pair = FACTORY.read().expect(F1);
+    let (factory, factory_data) = factory_pair.expect(F2);
+    factory(
+        factory_data,
+        config_name.as_ptr(),
+        config_name.len() as u32,
+        node_id.0,
+        handle,
+    );
 }
+
+// Methods beyond this point allow C++ pseudo-Nodes to invoke Oak messaging features.
+// They are needed regardless of whether `main` is in C++ or Rust.
 
 /// See [`oak_abi::wait_on_channels`].
 ///
@@ -179,7 +104,7 @@ pub unsafe extern "C" fn glue_wait_on_channels(node_id: u64, buf: *mut u8, count
             handles.push(handle);
         }
 
-        let proxy = proxy_for_node(node_id);
+        let proxy = oak_proxy::for_node(node_id);
         let channel_statuses = match proxy.wait_on_channels(&handles) {
             Ok(r) => r,
             Err(s) => return s as u32,
@@ -227,7 +152,7 @@ pub unsafe extern "C" fn glue_channel_read(
         node_id, handle, buf, size, actual_size, handle_buf, handle_count, actual_handle_count
     );
 
-    let proxy = proxy_for_node(node_id);
+    let proxy = oak_proxy::for_node(node_id);
     let msg = match proxy.channel_try_read_message(handle, size, handle_count as usize) {
         Ok(msg) => msg,
         Err(status) => return status as u32,
@@ -306,7 +231,7 @@ pub unsafe extern "C" fn glue_channel_write(
         msg.handles.push(handle);
     }
 
-    let proxy = proxy_for_node(node_id);
+    let proxy = oak_proxy::for_node(node_id);
     let result = proxy.channel_write(handle, msg);
     debug!("{{{}}}: channel_write() -> {:?}", node_id, result);
     match result {
@@ -323,7 +248,7 @@ pub unsafe extern "C" fn glue_channel_write(
 #[no_mangle]
 pub unsafe extern "C" fn glue_channel_create(node_id: u64, write: *mut u64, read: *mut u64) -> u32 {
     debug!("{{{}}}: channel_create({:?}, {:?})", node_id, write, read);
-    let proxy = proxy_for_node(node_id);
+    let proxy = oak_proxy::for_node(node_id);
     let (write_handle, read_handle) =
         proxy.channel_create(&oak_abi::label::Label::public_trusted());
     *write = write_handle;
@@ -339,27 +264,11 @@ pub unsafe extern "C" fn glue_channel_create(node_id: u64, write: *mut u64, read
 #[no_mangle]
 pub extern "C" fn glue_channel_close(node_id: u64, handle: u64) -> u32 {
     debug!("{{{}}}: channel_close({})", node_id, handle);
-    let proxy = proxy_for_node(node_id);
+    let proxy = oak_proxy::for_node(node_id);
     let result = proxy.channel_close(handle);
     debug!("{{{}}}: channel_close({}) -> {:?}", node_id, handle, result);
     match result {
         Ok(_) => OakStatus::Ok as u32,
         Err(status) => status as u32,
     }
-}
-
-fn create_and_run_node(config_name: &str, node_id: NodeId, handle: oak_abi::Handle) {
-    info!(
-        "invoke registered factory with '{}', node_id={:?}, handle={}",
-        config_name, node_id, handle
-    );
-    let factory = GLUE.read().expect(R1).as_ref().expect(R2).factory;
-    let factory_data = GLUE.read().expect(R1).as_ref().expect(R2).factory_data;
-    factory.expect("no factory registered!")(
-        factory_data,
-        config_name.as_ptr(),
-        config_name.len() as u32,
-        node_id.0,
-        handle,
-    );
 }

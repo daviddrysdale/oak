@@ -34,6 +34,7 @@ rust_library(
         "//cargo:prost",
         "//cargo:simple_logger",
         "//oak/server/rust/oak_abi",
+        "//oak/server/rust/oak_proxy",
         "//oak/server/rust/oak_runtime",
     ],
 )

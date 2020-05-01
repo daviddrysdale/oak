@@ -16,6 +16,7 @@ byteorder = "*"
 lazy_static = "*"
 log = { version = "*", features = ["std"] }
 oak_abi = { version = "=0.1.0" }
+oak_proxy = { version = "=0.1.0" }
 oak_runtime = { version = "=0.1.0" }
 prost = "*"
 simple_logger = "*"

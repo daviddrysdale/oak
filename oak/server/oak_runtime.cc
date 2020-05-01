@@ -106,11 +106,12 @@ OakRuntime::OakRuntime(const application::ApplicationConfiguration& config,
   if (!config.SerializeToString(&config_data)) {
     OAK_LOG(FATAL) << "Failed to serialize ApplicationConfiguration";
   }
+  OAK_LOG(INFO) << "Registering NodeFactory";
+  glue_register_factory(NodeFactory, reinterpret_cast<uintptr_t>(this));
   OAK_LOG(INFO) << "Starting Rust runtime";
   uint64_t grpc_node_id;
   grpc_handle_ = glue_start(reinterpret_cast<const uint8_t*>(config_data.data()),
-                            static_cast<uint32_t>(config_data.size()), NodeFactory,
-                            reinterpret_cast<uintptr_t>(this), &grpc_node_id);
+                            static_cast<uint32_t>(config_data.size()), &grpc_node_id);
   grpc_node_ =
       OakGrpcNode::Create(kGrpcNodeName, grpc_node_id, grpc_credentials, config.grpc_port());
   OAK_LOG(INFO) << "Started Rust runtime, node_id=" << grpc_node_id << ", handle=" << grpc_handle_;
