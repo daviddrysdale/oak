@@ -47,18 +47,14 @@ pub struct Opt {
     private_key: Option<String>,
     #[structopt(long, help = "Path to the PEM-encoded certificate chain")]
     cert_chain: Option<String>,
-    #[structopt(
-        long,
-        default_value = "3030",
-        help = "Metrics server port number. Defaults to 3030."
-    )]
+    #[structopt(long, default_value = "3030", help = "Metrics server port number.")]
     metrics_port: u16,
     #[structopt(long, help = "Starts the Runtime without a metrics server.")]
     no_metrics: bool,
     #[structopt(
         long,
         default_value = "1909",
-        help = "Introspection server port number. Defaults to 1909."
+        help = "Introspection server port number."
     )]
     introspect_port: u16,
     #[structopt(long, help = "Starts the Runtime without an introspection server.")]
@@ -75,11 +71,16 @@ fn read_file(filename: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    simple_logger::init().expect("failed to initialize logger");
+    if cfg!(feature = "oak_debug") {
+        simple_logger::init().expect("failed to initialize logger");
+    } else {
+        eprintln!("No debugging output configured");
+    }
     let opt = Opt::from_args();
 
     let app_config_data = read_file(&opt.application)?;
     let app_config = ApplicationConfiguration::decode(&app_config_data[..])?;
+    #[cfg(feature = "oak_debug")]
     let runtime_config = oak_runtime::RuntimeConfiguration {
         metrics_port: if opt.no_metrics {
             None
@@ -92,6 +93,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Some(opt.introspect_port)
         },
     };
+    #[cfg(not(feature = "oak_debug"))]
+    let runtime_config = oak_runtime::RuntimeConfiguration {
+        metrics_port: None,
+        introspect_port: None,
+    };
+
+    #[cfg(feature = "ffi_glue")]
+    oak_eulg::init();
 
     // Start the Runtime from the given config.
     info!("starting Runtime");
@@ -101,6 +110,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "initial node {:?} with write handle {:?}",
         runtime.node_id, initial_handle
     );
+
+    #[cfg(feature = "ffi_glue")]
+    let initial_node_join_handle = oak_eulg::start_initial_node(runtime.clone(), initial_handle);
 
     let done = Arc::new(AtomicBool::new(false));
     signal_hook::flag::register(signal_hook::SIGINT, Arc::clone(&done))?;
@@ -117,5 +129,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("stop Runtime");
     runtime.stop_runtime();
+
+    #[cfg(feature = "ffi_glue")]
+    initial_node_join_handle
+        .join()
+        .expect("failed to join FFI node thread");
+
     Ok(())
 }

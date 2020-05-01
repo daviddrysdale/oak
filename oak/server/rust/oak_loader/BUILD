@@ -23,6 +23,10 @@ package(
 rust_binary(
     name = "oak_loader",
     srcs = glob(["src/**/*.rs"]),
+    crate_features = [
+        "ffi_glue",
+        "oak_debug",
+    ],
     edition = "2018",
     deps = [
         "//cargo:log",
@@ -30,6 +34,7 @@ rust_binary(
         "//cargo:signal_hook",
         "//cargo:simple_logger",
         "//cargo:structopt",
+        "//oak/server/rust/oak_eulg",
         "//oak/server/rust/oak_runtime",
     ],
 )
