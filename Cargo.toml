@@ -21,6 +21,7 @@ members = [
   "experimental/split_grpc/proxy",
   "experimental/split_grpc/server",
   "oak/server/rust/oak_abi",
+  "oak/server/rust/oak_eulg",
   "oak/server/rust/oak_glue",
   "oak/server/rust/oak_loader",
   "oak/server/rust/oak_proxy",
@@ -40,6 +41,7 @@ members = [
 # Oak.
 oak = { path = "sdk/rust/oak" }
 oak_abi = { path = "oak/server/rust/oak_abi" }
+oak_eulg = { path = "oak/server/rust/oak_eulg" }
 oak_glue = { path = "oak/server/rust/oak_glue" }
 oak_loader = { path = "oak/server/rust/oak_loader" }
 oak_proxy = { path = "oak/server/rust/oak_proxy" }

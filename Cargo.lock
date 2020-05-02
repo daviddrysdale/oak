@@ -1237,6 +1237,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "oak_eulg"
+version = "0.1.0"
+dependencies = [
+ "log 0.4.8 (registry+https://github.com/rust-lang/crates.io-index)",
+ "oak_abi 0.1.0",
+ "oak_proxy 0.1.0",
+ "oak_runtime 0.1.0",
+]
+
+[[package]]
 name = "oak_glue"
 version = "0.1.0"
 dependencies = [
