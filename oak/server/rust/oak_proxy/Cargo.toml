@@ -1,0 +1,20 @@
+[package]
+name = "oak_proxy"
+version = "0.1.0"
+authors = ["David Drysdale <drysdale@google.com>"]
+edition = "2018"
+license = "Apache-2.0"
+
+[lib]
+name = "oak_proxy"
+
+[features]
+cpp_main = []
+default = []
+
+[dependencies]
+# Note that if new dependencies are added here:
+#  - they need to be synced to //cargo/Cargo.toml
+#  - `cd cargo && cargo raze` needs re-running, and the results checked in
+lazy_static = "*"
+oak_runtime = { version = "=0.1.0" }
