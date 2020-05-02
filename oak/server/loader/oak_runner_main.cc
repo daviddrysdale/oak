@@ -23,7 +23,6 @@
 #include "absl/flags/parse.h"
 #include "absl/synchronization/notification.h"
 #include "absl/time/time.h"
-#include "include/grpcpp/grpcpp.h"
 #include "oak/common/app_config.h"
 #include "oak/common/logging.h"
 #include "oak/common/utils.h"
@@ -40,16 +39,6 @@ absl::Notification server_done;
 
 void sigint_handler(int) { server_done.Notify(); }
 
-std::shared_ptr<grpc::ServerCredentials> BuildTlsCredentials(std::string pem_root_certs,
-                                                             std::string private_key,
-                                                             std::string cert_chain) {
-  grpc::SslServerCredentialsOptions::PemKeyCertPair key_cert_pair = {private_key, cert_chain};
-  grpc::SslServerCredentialsOptions options;
-  options.pem_root_certs = pem_root_certs;
-  options.pem_key_cert_pairs.push_back(key_cert_pair);
-  return grpc::SslServerCredentials(options);
-}
-
 }  // namespace
 
 int main(int argc, char* argv[]) {
@@ -65,7 +54,7 @@ int main(int argc, char* argv[]) {
   std::unique_ptr<oak::application::ApplicationConfiguration> application_config =
       oak::ReadConfigFromFile(absl::GetFlag(FLAGS_application));
 
-  // Build server credentials
+  // Collect the components needed for server credentials.
   std::string private_key_path = absl::GetFlag(FLAGS_private_key);
   std::string cert_chain_path = absl::GetFlag(FLAGS_cert_chain);
   if (private_key_path.empty()) {
@@ -78,13 +67,12 @@ int main(int argc, char* argv[]) {
   std::string cert_chain = oak::utils::read_file(cert_chain_path);
   std::string ca_cert_path = absl::GetFlag(FLAGS_ca_cert);
   std::string ca_cert = ca_cert_path == "" ? "" : oak::utils::read_file(ca_cert_path);
-  std::shared_ptr<grpc::ServerCredentials> grpc_credentials =
-      BuildTlsCredentials(ca_cert, private_key, cert_chain);
 
   // Create the Runtime with the Application.
   OAK_LOG(INFO) << "Creating Oak runtime and application";
 
-  std::unique_ptr<oak::OakRuntime> runtime = oak::OakRuntime::Create(*application_config, grpc_credentials);
+  std::unique_ptr<oak::OakRuntime> runtime =
+      oak::OakRuntime::Create(*application_config, ca_cert, private_key, cert_chain);
   if (runtime == nullptr) {
     OAK_LOG(ERROR) << "Invalid configuration";
     return 1;

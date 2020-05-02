@@ -24,6 +24,7 @@
 #include "absl/base/call_once.h"
 #include "absl/memory/memory.h"
 #include "absl/strings/str_cat.h"
+#include "include/grpcpp/grpcpp.h"
 #include "oak/common/app_config.h"
 #include "oak/common/logging.h"
 #include "oak/server/grpc_client_node.h"
@@ -48,11 +49,23 @@ void NodeFactory(uintptr_t data, const char* name, uint32_t name_len, uint64_t n
   runtime->CreateAndRunPseudoNode(config_name, node_id, handle);
 }
 
+// Helper to build gRPC server credentials from certificates and keys.
+std::shared_ptr<grpc::ServerCredentials> BuildTlsCredentials(std::string pem_root_certs,
+                                                             std::string private_key,
+                                                             std::string cert_chain) {
+  grpc::SslServerCredentialsOptions::PemKeyCertPair key_cert_pair = {private_key, cert_chain};
+  grpc::SslServerCredentialsOptions options;
+  options.pem_root_certs = pem_root_certs;
+  options.pem_key_cert_pairs.push_back(key_cert_pair);
+  return grpc::SslServerCredentials(options);
+}
+
 }  // namespace
 
-std::unique_ptr<OakRuntime> OakRuntime::Create(
-    const application::ApplicationConfiguration& config,
-    std::shared_ptr<grpc::ServerCredentials> grpc_credentials) {
+std::unique_ptr<OakRuntime> OakRuntime::Create(const application::ApplicationConfiguration& config,
+                                               const std::string& pem_root_certs,
+                                               const std::string& private_key,
+                                               const std::string& cert_chain) {
 #ifdef OAK_DEBUG
   bool debug_mode = true;
 #else
@@ -65,6 +78,8 @@ std::unique_ptr<OakRuntime> OakRuntime::Create(
     return nullptr;
   }
 
+  std::shared_ptr<grpc::ServerCredentials> grpc_credentials =
+      BuildTlsCredentials(pem_root_certs, private_key, cert_chain);
   return std::unique_ptr<OakRuntime>(new OakRuntime(config, grpc_credentials));
 }
 

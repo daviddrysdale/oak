@@ -36,9 +36,12 @@ namespace oak {
 // System, but mostly acts as a proxy for the Rust runtime.
 class OakRuntime {
  public:
+  // Create a Runtime for the given Application, using the specified certificates and keys.
   static std::unique_ptr<OakRuntime> Create(
       const application::ApplicationConfiguration& config,
-      std::shared_ptr<grpc::ServerCredentials> grpc_credentials);
+      const std::string& pem_root_certs,
+      const std::string& private_key,
+      const std::string& cert_chain);
   ~OakRuntime() = default;
 
   void Start() const;
