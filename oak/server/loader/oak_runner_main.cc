@@ -15,6 +15,7 @@
  */
 
 #include <csignal>
+#include <memory>
 #include <sstream>
 #include <string>
 
@@ -22,10 +23,11 @@
 #include "absl/flags/parse.h"
 #include "absl/synchronization/notification.h"
 #include "absl/time/time.h"
+#include "include/grpcpp/grpcpp.h"
 #include "oak/common/app_config.h"
 #include "oak/common/logging.h"
 #include "oak/common/utils.h"
-#include "oak/server/loader/oak_loader.h"
+#include "oak/server/oak_runtime.h"
 
 ABSL_FLAG(std::string, application, "", "Application configuration file");
 ABSL_FLAG(std::string, ca_cert, "", "Path to the PEM-encoded CA root certificate");
@@ -59,13 +61,11 @@ int main(int argc, char* argv[]) {
   google::InstallFailureSignalHandler();
 #endif
 
-  // Create the loader instance.
-  std::unique_ptr<oak::OakLoader> loader = absl::make_unique<oak::OakLoader>();
-
   // Load application configuration.
   std::unique_ptr<oak::application::ApplicationConfiguration> application_config =
       oak::ReadConfigFromFile(absl::GetFlag(FLAGS_application));
 
+  // Build server credentials
   std::string private_key_path = absl::GetFlag(FLAGS_private_key);
   std::string cert_chain_path = absl::GetFlag(FLAGS_cert_chain);
   if (private_key_path.empty()) {
@@ -78,26 +78,28 @@ int main(int argc, char* argv[]) {
   std::string cert_chain = oak::utils::read_file(cert_chain_path);
   std::string ca_cert_path = absl::GetFlag(FLAGS_ca_cert);
   std::string ca_cert = ca_cert_path == "" ? "" : oak::utils::read_file(ca_cert_path);
-
   std::shared_ptr<grpc::ServerCredentials> grpc_credentials =
       BuildTlsCredentials(ca_cert, private_key, cert_chain);
 
-  grpc::Status status = loader->CreateApplication(*application_config, grpc_credentials);
-  if (!status.ok()) {
-    OAK_LOG(ERROR) << "Failed to create application";
+  // Create the Runtime with the Application.
+  OAK_LOG(INFO) << "Creating Oak runtime and application";
+
+  std::unique_ptr<oak::OakRuntime> runtime = oak::OakRuntime::Create(*application_config, grpc_credentials);
+  if (runtime == nullptr) {
+    OAK_LOG(ERROR) << "Invalid configuration";
     return 1;
   }
 
-  std::stringstream address;
-  address << "0.0.0.0:" << application_config->grpc_port();
-  OAK_LOG(INFO) << "Oak Application: " << address.str();
+  // Start the runtime.
+  OAK_LOG(INFO) << "Starting Oak runtime on port :" << application_config->grpc_port();
+  runtime->Start();
 
   // Wait until notification of signal termination.
   std::signal(SIGINT, sigint_handler);
   server_done.WaitForNotification();
 
   OAK_LOG(ERROR) << "Terminate Oak Application";
-  loader->TerminateApplication();
+  runtime->Stop();
 
   return 0;
 }

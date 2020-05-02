@@ -15,7 +15,7 @@
 #
 
 load("@io_bazel_rules_docker//container:container.bzl", "container_image")
-load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
+load("@rules_cc//cc:defs.bzl", "cc_binary")
 
 package(
     default_visibility = [
@@ -25,32 +25,15 @@ package(
     licenses = ["notice"],
 )
 
-cc_library(
-    name = "oak_loader",
-    srcs = [
-        "oak_loader.cc",
-    ],
-    hdrs = [
-        "oak_loader.h",
-    ],
-    deps = [
-        "//oak/common:logging",
-        "//oak/proto:application_cc_grpc",
-        "//oak/server:oak_runtime",
-        "@com_github_grpc_grpc//:grpc++",
-        "@com_google_absl//absl/memory",
-        "@com_google_absl//absl/strings",
-    ],
-)
-
 cc_binary(
     name = "oak_runner",
     srcs = ["oak_runner_main.cc"],
     deps = [
-        ":oak_loader",
         "//oak/common:app_config",
         "//oak/common:logging",
         "//oak/common:utils",
+        "//oak/proto:application_cc_grpc",
+        "//oak/server:oak_runtime",
         "@com_github_grpc_grpc//:grpc++",
         "@com_google_absl//absl/flags:flag",
         "@com_google_absl//absl/flags:parse",
