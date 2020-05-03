@@ -42,5 +42,7 @@ cc_library(
     srcs = ["oak_eulg.cc"],
     deps = [
         "//oak/common:logging",
+        "//oak/proto:application_cc_proto",
+        "//oak/server:oak_runtime",
     ],
 )

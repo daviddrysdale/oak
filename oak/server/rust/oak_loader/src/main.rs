@@ -100,10 +100,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     #[cfg(feature = "ffi_glue")]
-    oak_eulg::init();
+    // Pass the application and TLS configuration across to C++-land.
+    let cpp_runtime = oak_eulg::init(
+        cfg!(feature = "oak_debug"),
+        app_config_data,
+        read_file(&opt.ca_cert.expect("--ca_cert option required"))?,
+        read_file(&opt.private_key.expect("--private_key option required"))?,
+        read_file(&opt.cert_chain.expect("--cert_chain option required"))?,
+    );
 
     // Start the Runtime from the given config.
-    info!("starting Runtime");
+    info!("starting Runtime, config {:?}", runtime_config);
     let (runtime, initial_handle) = configure_and_run(app_config, runtime_config)
         .map_err(|status| format!("status {:?}", status))?;
     info!(
@@ -112,7 +119,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     #[cfg(feature = "ffi_glue")]
-    let initial_node_join_handle = oak_eulg::start_initial_node(runtime.clone(), initial_handle);
+    let initial_node_join_handle =
+        oak_eulg::start_initial_node(cpp_runtime, runtime.clone(), initial_handle);
 
     let done = Arc::new(AtomicBool::new(false));
     signal_hook::flag::register(signal_hook::SIGINT, Arc::clone(&done))?;
@@ -127,13 +135,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
 
+    // If the initial Node is running in C++-land, stop that before the Runtime.
+    #[cfg(feature = "ffi_glue")]
+    {
+        info!("stop initial C++ Node");
+        oak_eulg::stop_initial_node(cpp_runtime);
+    }
+
     info!("stop Runtime");
     runtime.stop_runtime();
 
     #[cfg(feature = "ffi_glue")]
-    initial_node_join_handle
-        .join()
-        .expect("failed to join FFI node thread");
+    {
+        info!("terminate C++ runtime");
+        oak_eulg::terminate(cpp_runtime);
 
+        info!("wait for initial node thread");
+        initial_node_join_handle
+            .join()
+            .expect("failed to join FFI node thread");
+    }
+
+    info!("Runtime stopped");
     Ok(())
 }
