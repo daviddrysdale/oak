@@ -32,8 +32,8 @@ class OakGrpcNode final : public OakNode {
   // Create an Oak node with the `name` and gRPC `port`.
   // If `port` equals 0, then gRPC port is assigned automatically.
   static std::unique_ptr<OakGrpcNode> Create(
-      const std::string& name, NodeId node_id,
-      std::shared_ptr<grpc::ServerCredentials> grpc_credentials, const uint16_t port = 0);
+      const std::string& name, std::shared_ptr<grpc::ServerCredentials> grpc_credentials,
+      const uint16_t port = 0);
   virtual ~OakGrpcNode(){};
 
   void Run(Handle handle) override;
@@ -50,8 +50,8 @@ class OakGrpcNode final : public OakNode {
  private:
   friend class ModuleInvocation;
 
-  OakGrpcNode(const std::string& name, NodeId node_id)
-      : OakNode(name, node_id), next_stream_id_(1), handle_(kInvalidHandle) {}
+  OakGrpcNode(const std::string& name)
+      : OakNode(name, 0), next_stream_id_(1), handle_(kInvalidHandle) {}
   OakGrpcNode(const OakGrpcNode&) = delete;
   OakGrpcNode& operator=(const OakGrpcNode&) = delete;
 

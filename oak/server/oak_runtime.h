@@ -37,13 +37,13 @@ namespace oak {
 class OakRuntime {
  public:
   // Create a Runtime for the given Application, using the specified certificates and keys.
-  static std::unique_ptr<OakRuntime> Create(
-      const application::ApplicationConfiguration& config,
-      const std::string& pem_root_certs,
-      const std::string& private_key,
-      const std::string& cert_chain);
+  static std::unique_ptr<OakRuntime> Create(const application::ApplicationConfiguration& config,
+                                            const std::string& pem_root_certs,
+                                            const std::string& private_key,
+                                            const std::string& cert_chain, bool rust_main = false);
   ~OakRuntime() = default;
 
+  void RunGrpcNode(uint64_t node_id, Handle handle);
   void Start() const;
   void Stop() const;
 
@@ -51,10 +51,13 @@ class OakRuntime {
 
  private:
   OakRuntime(const application::ApplicationConfiguration& config,
-             std::shared_ptr<grpc::ServerCredentials> grpc_credentials);
+             std::shared_ptr<grpc::ServerCredentials> grpc_credentials, bool rust_main);
   OakRuntime& operator=(const OakRuntime& other) = delete;
 
   std::unique_ptr<OakNode> CreateNode(const std::string& config_name, NodeId node_id) const;
+
+  // Whether main() is in Rust.
+  const bool rust_main_;
 
   // Information derived from ApplicationConfiguration, const after construction:
 

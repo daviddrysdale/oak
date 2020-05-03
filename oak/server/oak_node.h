@@ -58,6 +58,8 @@ class OakNode {
   OakNode(const std::string& name, NodeId node_id) : name_(name), node_id_(node_id) {}
   virtual ~OakNode() {}
 
+  void SetNodeId(NodeId node_id) { node_id_ = node_id; }
+
   // The Run() method is run on a new thread, and should respond to termination
   // requests (indicated by termination_pending_.load()) in a timely manner.
   virtual void Run(Handle handle) = 0;
@@ -86,7 +88,7 @@ class OakNode {
 
  protected:
   const std::string name_;
-  const NodeId node_id_;
+  NodeId node_id_;
 
  private:
   // Allow the Runtime to use internal methods.

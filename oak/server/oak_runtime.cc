@@ -65,9 +65,10 @@ std::shared_ptr<grpc::ServerCredentials> BuildTlsCredentials(std::string pem_roo
 std::unique_ptr<OakRuntime> OakRuntime::Create(const application::ApplicationConfiguration& config,
                                                const std::string& pem_root_certs,
                                                const std::string& private_key,
-                                               const std::string& cert_chain) {
+                                               const std::string& cert_chain, bool rust_main) {
 #ifdef OAK_DEBUG
-  bool debug_mode = true;
+  // If main() is in Rust, don't (re-)initialize debugging.
+  bool debug_mode = !rust_main;
 #else
   bool debug_mode = false;
 #endif
@@ -80,12 +81,12 @@ std::unique_ptr<OakRuntime> OakRuntime::Create(const application::ApplicationCon
 
   std::shared_ptr<grpc::ServerCredentials> grpc_credentials =
       BuildTlsCredentials(pem_root_certs, private_key, cert_chain);
-  return std::unique_ptr<OakRuntime>(new OakRuntime(config, grpc_credentials));
+  return std::unique_ptr<OakRuntime>(new OakRuntime(config, grpc_credentials, rust_main));
 }
 
 OakRuntime::OakRuntime(const application::ApplicationConfiguration& config,
-                       std::shared_ptr<grpc::ServerCredentials> grpc_credentials)
-    : grpc_handle_(kInvalidHandle) {
+                       std::shared_ptr<grpc::ServerCredentials> grpc_credentials, bool rust_main)
+    : rust_main_(rust_main), grpc_handle_(kInvalidHandle) {
   // Accumulate the various data structures indexed by config name.
   for (const auto& node_config : config.node_configs()) {
     if (node_config.has_storage_config()) {
@@ -106,15 +107,31 @@ OakRuntime::OakRuntime(const application::ApplicationConfiguration& config,
   if (!config.SerializeToString(&config_data)) {
     OAK_LOG(FATAL) << "Failed to serialize ApplicationConfiguration";
   }
+
+  // Create the gRPC server pseudo-Node instance.
+  grpc_node_ = OakGrpcNode::Create(kGrpcNodeName, grpc_credentials, config.grpc_port());
+
   OAK_LOG(INFO) << "Registering NodeFactory";
   glue_register_factory(NodeFactory, reinterpret_cast<uintptr_t>(this));
-  OAK_LOG(INFO) << "Starting Rust runtime";
-  uint64_t grpc_node_id;
-  grpc_handle_ = glue_start(reinterpret_cast<const uint8_t*>(config_data.data()),
-                            static_cast<uint32_t>(config_data.size()), &grpc_node_id);
-  grpc_node_ =
-      OakGrpcNode::Create(kGrpcNodeName, grpc_node_id, grpc_credentials, config.grpc_port());
-  OAK_LOG(INFO) << "Started Rust runtime, node_id=" << grpc_node_id << ", handle=" << grpc_handle_;
+
+  if (!rust_main) {
+    // If main() is in C++, kick off the Rust runtime and get back from it
+    // the NodeID and initial handle to use for the gRPC server pseudo-Node.
+    OAK_LOG(INFO) << "Starting Rust runtime";
+    uint64_t grpc_node_id;
+    grpc_handle_ = glue_start(reinterpret_cast<const uint8_t*>(config_data.data()),
+                              static_cast<uint32_t>(config_data.size()), &grpc_node_id);
+    grpc_node_->SetNodeId(grpc_node_id);
+    OAK_LOG(INFO) << "Started Rust runtime";
+  }
+}
+
+void OakRuntime::RunGrpcNode(uint64_t node_id, Handle handle) {
+  OAK_LOG(INFO) << "Set gRPC Node info: node_id=" << node_id << ", handle=" << handle;
+  grpc_handle_ = handle;
+  grpc_node_->SetNodeId(node_id);
+  OAK_LOG(INFO) << "Running gRPC Node";
+  grpc_node_->Run(grpc_handle_);
 }
 
 // Create (but don't start) a new Node instance.  Return a borrowed pointer to
@@ -173,8 +190,10 @@ void OakRuntime::Start() const {
 void OakRuntime::Stop() const {
   OAK_LOG(INFO) << "Stopping gRPC server pseudo-Node...";
   grpc_node_->Stop();
-  OAK_LOG(INFO) << "Stopping Rust runtime...";
-  glue_stop();
+  if (!rust_main_) {
+    OAK_LOG(INFO) << "Stopping Rust runtime...";
+    glue_stop();
+  }
 }
 
 }  // namespace oak
