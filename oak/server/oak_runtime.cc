@@ -126,6 +126,11 @@ OakRuntime::OakRuntime(const application::ApplicationConfiguration& config,
   }
 }
 
+OakRuntime::~OakRuntime() {
+  OAK_LOG(INFO) << "Unregistering NodeFactory";
+  glue_unregister_factory();
+}
+
 void OakRuntime::RunGrpcNode(uint64_t node_id, Handle handle) {
   OAK_LOG(INFO) << "Set gRPC Node info: node_id=" << node_id << ", handle=" << handle;
   grpc_handle_ = handle;

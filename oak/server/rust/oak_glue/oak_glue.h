@@ -37,6 +37,9 @@ typedef void (*node_factory)(uintptr_t data, const char* name, uint32_t name_len
 // Register a callback to be used to create pseudo-Nodes.
 void glue_register_factory(node_factory factory, uintptr_t factory_data);
 
+// Clear registered callback.
+void glue_unregister_factory();
+
 // Start the Rust runtime, passing a serialized ApplicationConfiguration
 // protobuf message.  Fills in node_id with the NodeId value for the implicitly
 // created initial Node (which is used to run the gRPC server pseudo-Node under),

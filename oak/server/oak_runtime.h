@@ -41,7 +41,7 @@ class OakRuntime {
                                             const std::string& pem_root_certs,
                                             const std::string& private_key,
                                             const std::string& cert_chain, bool rust_main = false);
-  ~OakRuntime() = default;
+  ~OakRuntime();
 
   void RunGrpcNode(uint64_t node_id, Handle handle);
   void Start() const;

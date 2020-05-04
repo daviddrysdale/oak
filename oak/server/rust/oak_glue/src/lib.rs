@@ -53,6 +53,13 @@ pub unsafe extern "C" fn glue_register_factory(
     info!("register oak_glue::cpp_main::create_and_run_node() as node factory");
 }
 
+/// Clear callback used for creating C++ pseudo-Nodes.
+#[no_mangle]
+pub extern "C" fn glue_unregister_factory() {
+    *FACTORY.write().expect(F1) = None;
+    info!("C++ factory callback unregistered");
+}
+
 /// Method to provide a Rust-compatible wrapper around the registered C++ pseudo-Node
 /// factory callback function pointer.
 fn create_and_run_node(config_name: &str, node_id: NodeId, handle: oak_abi::Handle) {
