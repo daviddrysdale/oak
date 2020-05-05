@@ -45,14 +45,14 @@ type WaitingThreads = Mutex<HashMap<ThreadId, Weak<Thread>>>;
 
 /// The internal implementation of a channel representation backed by a `VecDeque<Message>`.
 ///
-/// Channels are reference counted using `Arc<Channel>`, almost always in the form of a
+/// Channels are reference counted using `Arc<Channel>`, always in the form of a
 /// `ChannelHalf` object that references one end of the `Channel` (read or write) and which
-/// is included in the `reader_count` or `writer_count`.  The exception to this is the overall
-/// `ChannelMapping` object, which holds a raw `Arc<Channel>` indexed by the `ChannelId` value.
-/// When the counts of `ChannelHalf` objects referring to this channel both reach zero, this
-/// `Channel` can be removed from the `ChannelMapping`, which removes the final `Arc<Channel>`
-/// and triggers the `Drop` of the `Channel`.
+/// is included in the `reader_count` or `writer_count`.  The `ChannelMapping` object also
+/// holds a `Weak` reference to the `Channel`, to allow garbage collection and introspection.
 pub struct Channel {
+    // The owning `ChannelMapping`.
+    owner: Weak<ChannelMapping>,
+
     // The identifier under which this channel is tracked in the main `ChannelMapping`.
     id: ChannelId,
 
@@ -126,6 +126,15 @@ impl Drop for ChannelHalf {
             ChannelHalfDirection::Write => self.channel.dec_writer_count(),
             ChannelHalfDirection::Read => self.channel.dec_reader_count(),
         };
+
+        if self.direction == ChannelHalfDirection::Write
+            && self.channel.has_readers()
+            && !self.channel.has_writers()
+        {
+            // This was the last writer to the channel: wake any waiters so they
+            // can be aware that the channel is orphaned.
+            self.channel.wake_waiters();
+        }
     }
 }
 
@@ -209,12 +218,9 @@ impl HtmlPath for ChannelId {
 
 /// Mapping of [`ChannelId`]s to [`Channel`]s.
 pub struct ChannelMapping {
-    // The `channels` field holds the only raw `Arc<Channel>` which is not encapsulated in a
-    // `ChannelHalf` object; this means that the refcount for the channel will always be
-    // one higher than (channel.reader_count + channel.writer_count).  When the latter
-    // drops to zero (if done via ChannelMapping.drop_half()), then this final `Arc`
-    // will be dropped when the `Channel` is removed from this `HashMap`.
-    channels: RwLock<HashMap<ChannelId, Arc<Channel>>>,
+    // The `channels` field hold a `Weak` reference to a `Channel`, to allow
+    // introspection and to allow leaked cycles to be garbage collected.
+    channels: RwLock<HashMap<ChannelId, Weak<Channel>>>,
     next_channel_id: AtomicU64,
 }
 
@@ -226,13 +232,25 @@ impl Drop for Channel {
         // channel to existence) so no need to `wake_waiters()`.
         // Deliberately clear the HashMap under the lock to avoid a TSAN report.
         self.waiting_threads.lock().unwrap().clear();
+
+        // Drop any weak reference from the owner's `HashMap` too.
+        if let Some(mapping) = self.owner.upgrade() {
+            let mut channels = mapping.channels.write().unwrap();
+            channels.remove(&self.id);
+            debug!("Channel::drop: removed channel {:?} from tracking", self.id);
+        }
     }
 }
 
 impl Channel {
-    fn new(id: ChannelId, label: &oak_abi::label::Label) -> Arc<Channel> {
+    fn new(
+        owner: Weak<ChannelMapping>,
+        id: ChannelId,
+        label: &oak_abi::label::Label,
+    ) -> Arc<Channel> {
         debug!("create new Channel object with ID {}", id);
         Arc::new(Channel {
+            owner,
             id,
             messages: RwLock::new(Messages::new()),
             writer_count: AtomicU64::new(0),
@@ -362,65 +380,27 @@ impl ChannelMapping {
     }
 
     /// Give access to the internals of the channel mapping.
-    pub fn get_channels<'a>(&'a self) -> RwLockWriteGuard<'a, HashMap<ChannelId, Arc<Channel>>> {
+    pub fn get_channels<'a>(&'a self) -> RwLockWriteGuard<'a, HashMap<ChannelId, Weak<Channel>>> {
         self.channels.write().unwrap()
     }
 
     /// Creates a new [`Channel`] and returns a `(writer half, reader half)` pair.
-    pub fn new_channel(&self, label: &oak_abi::label::Label) -> (ChannelHalf, ChannelHalf) {
+    pub fn new_channel(
+        self: &Arc<Self>,
+        label: &oak_abi::label::Label,
+    ) -> (ChannelHalf, ChannelHalf) {
         let channel_id = self.next_channel_id.fetch_add(1, SeqCst);
-        let channel = Channel::new(channel_id, label);
+        let channel = Channel::new(Arc::downgrade(&self), channel_id, label);
         let result = (
             ChannelHalf::new(channel.clone(), ChannelHalfDirection::Write),
             ChannelHalf::new(channel.clone(), ChannelHalfDirection::Read),
         );
         debug!("tracking new channel ID {}", channel_id);
-        self.channels.write().unwrap().insert(channel_id, channel);
+        self.channels
+            .write()
+            .unwrap()
+            .insert(channel_id, Arc::downgrade(&channel));
         result
-    }
-
-    /// Drop a [`ChannelHalf`], which may result in the underlying [`Channel`] becoming orphaned
-    /// and so freed.
-    pub fn drop_half(&self, half: ChannelHalf) {
-        let channel = half.channel.clone();
-        let direction = half.direction;
-        drop(half);
-
-        if !channel.has_users() {
-            // We have just dropped the final half that referred to the channel.
-            // Drop it from the master `HashMap` too.
-            {
-                let mut channels = self.channels.write().unwrap();
-                channels.remove(&channel.id);
-            }
-            // We should now hold the only live `Arc<Channel>` for the channel.
-            // Manually clear the channel's contents before we drop that too,
-            // but be careful to avoid infinite recursion.
-            let messages: Messages;
-            {
-                messages = channel.messages.write().unwrap().drain(..).collect();
-                // `channel.messages` is now empty, so if another channel's
-                // messages refer to this channel, it will go no further.
-            }
-            for msg in messages {
-                for half in msg.channels {
-                    debug!("drop_half: dropping half {:?} from queued message", half);
-                    self.drop_half(half);
-                }
-            }
-
-            debug!(
-                "drop_half: removed channel {:?} from tracking, with approx {} Arcs and {} weak refs remaining",
-                channel.id,
-                Arc::strong_count(&channel),
-                Arc::weak_count(&channel)
-            );
-            drop(channel); // be explicit: final `Arc<Channel>` dropped here.
-        } else if direction == ChannelHalfDirection::Write && !channel.has_writers() {
-            // This was the last writer to the channel: wake any waiters so they
-            // can be aware that the channel is orphaned.
-            channel.wake_waiters();
-        }
     }
 
     /// Unblock all threads waiting on any channel.
@@ -431,7 +411,9 @@ impl ChannelMapping {
             .expect("could not acquire channel mapping")
             .values()
         {
-            channel.wake_waiters();
+            if let Some(channel) = channel.upgrade() {
+                channel.wake_waiters();
+            }
         }
     }
 
@@ -455,34 +437,51 @@ impl ChannelMapping {
         }
     }
 
-    pub fn channel_gc(&self, unvisited: HashSet<ChannelId>) -> String {
+    pub fn gc(&self, unvisited: HashSet<ChannelId>) -> String {
         let mut s = "<h2>Channel GC Result</h2>".to_string();
-        let mut channels = self.channels.write().unwrap();
         for channel_id in unvisited {
-            if let Some(channel) = channels.remove(&channel_id) {
+            let result = self.gc_channel(channel_id);
+            write!(&mut s, "<p>Reaped Channel {}: {}", channel_id, result).unwrap();
+        }
+        info!(
+            "channel count after GC done: {}",
+            self.channels.read().unwrap().len()
+        );
+        s
+    }
+
+    fn gc_channel(&self, channel_id: ChannelId) -> String {
+        let channel_opt = { self.channels.write().unwrap().remove(&channel_id) };
+        if let Some(channel_weak) = channel_opt {
+            if let Some(channel) = channel_weak.upgrade() {
                 debug!(
                     "drop unreachable channel {:?} with {} Arcs remaining",
                     channel,
                     Arc::strong_count(&channel)
                 );
-                write!(&mut s, "<p>Reaped {:?}", channel).unwrap();
 
-                // Perform the same actions as in `drop_half()`, but while
+                // Perform the same actions as in `ChannelHalf::drop()`, but while
                 // holding the write lock and without bothering to track.
                 // `ChannelHalf` counts
                 {
                     channel.messages.write().unwrap().clear();
                 }
                 drop(channel); // Be explicit: ref dropped here.
+                "dropped".to_string()
             } else {
                 error!(
-                    "Channel ID {} marked as unvisited but not present in ChannelMapping!",
+                    "Unvisited channel ID {} present in ChannelMapping but weak ref invalid",
                     channel_id
                 );
+                "found dangling weak ref".to_string()
             }
+        } else {
+            error!(
+                "Unvisited channel ID {} not present in ChannelMapping!",
+                channel_id
+            );
+            "not found".to_string()
         }
-        info!("channel count after GC done: {}", channels.len());
-        s
     }
 
     /// Build a Dot nodes stanza for the `ChannelMapping`.
@@ -498,18 +497,29 @@ impl ChannelMapping {
             .unwrap();
             let channels = self.channels.read().unwrap();
             for channel_id in channels.keys().sorted() {
-                let channel = channels.get(&channel_id).unwrap();
-                writeln!(
-                    &mut s,
-                    r###"    {} [label="channel-{}\\nm={}, w={}, r={}" URL="{}"]"###,
-                    channel_id.dot_id(),
-                    channel_id,
-                    channel.messages.read().unwrap().len(),
-                    channel.reader_count.load(SeqCst),
-                    channel.writer_count.load(SeqCst),
-                    channel_id.html_path(),
-                )
-                .unwrap();
+                let channel_weak = channels.get(&channel_id).unwrap();
+                if let Some(channel) = channel_weak.upgrade() {
+                    writeln!(
+                        &mut s,
+                        r###"    {} [label="channel-{}\\nm={}, w={}, r={}" URL="{}"]"###,
+                        channel_id.dot_id(),
+                        channel_id,
+                        channel.messages.read().unwrap().len(),
+                        channel.reader_count.load(SeqCst),
+                        channel.writer_count.load(SeqCst),
+                        channel_id.html_path(),
+                    )
+                    .unwrap();
+                } else {
+                    writeln!(
+                        &mut s,
+                        r###"    {} [label="channel-{}\\nweak-only" URL="{}"]"###,
+                        channel_id.dot_id(),
+                        channel_id,
+                        channel_id.html_path(),
+                    )
+                    .unwrap();
+                }
             }
             writeln!(&mut s, "  }}").unwrap();
         }
@@ -532,30 +542,32 @@ impl ChannelMapping {
             let mut msg_counter = 0;
             let channels = self.channels.read().unwrap();
             for channel_id in channels.keys().sorted() {
-                let channel = channels.get(&channel_id).unwrap();
-                let mut prev_graph_node = channel_id.dot_id();
-                for msg in channel.messages.read().unwrap().iter() {
-                    msg_counter += 1;
-                    let graph_node = format!("msg{}", msg_counter);
-                    writeln!(
-                        &mut s,
-                        "    {} -> {} [style=dashed arrowhead=none]",
-                        graph_node, prev_graph_node
-                    )
-                    .unwrap();
-                    for half in &msg.channels {
-                        match half.direction {
-                            ChannelHalfDirection::Write => {
-                                writeln!(&mut s, "    {} -> {}", graph_node, half.dot_id())
-                                    .unwrap();
-                            }
-                            ChannelHalfDirection::Read => {
-                                writeln!(&mut s, "    {} -> {}", half.dot_id(), graph_node)
-                                    .unwrap();
+                let channel_weak = channels.get(&channel_id).unwrap();
+                if let Some(channel) = channel_weak.upgrade() {
+                    let mut prev_graph_node = channel_id.dot_id();
+                    for msg in channel.messages.read().unwrap().iter() {
+                        msg_counter += 1;
+                        let graph_node = format!("msg{}", msg_counter);
+                        writeln!(
+                            &mut s,
+                            "    {} -> {} [style=dashed arrowhead=none]",
+                            graph_node, prev_graph_node
+                        )
+                        .unwrap();
+                        for half in &msg.channels {
+                            match half.direction {
+                                ChannelHalfDirection::Write => {
+                                    writeln!(&mut s, "    {} -> {}", graph_node, half.dot_id())
+                                        .unwrap();
+                                }
+                                ChannelHalfDirection::Read => {
+                                    writeln!(&mut s, "    {} -> {}", half.dot_id(), graph_node)
+                                        .unwrap();
+                                }
                             }
                         }
+                        prev_graph_node = graph_node;
                     }
-                    prev_graph_node = graph_node;
                 }
             }
             writeln!(&mut s, "  }}").unwrap();
@@ -591,11 +603,13 @@ impl ChannelMapping {
     #[cfg(feature = "oak_debug")]
     pub fn html_for_channel(&self, id: u64) -> Option<String> {
         let channel_id: ChannelId = id;
-        let channel;
         {
             let channels = self.channels.read().unwrap();
-            channel = channels.get(&channel_id)?.clone();
+            let channel_weak = channels.get(&channel_id)?.clone();
+            match channel_weak.upgrade() {
+                None => Some(format!("Weak reference to Channel {{ id={} }}", channel_id)),
+                Some(channel) => Some(channel.html()),
+            }
         }
-        Some(channel.html())
     }
 }

@@ -181,7 +181,7 @@ pub struct Runtime {
     configuration: Configuration,
     terminating: AtomicBool,
 
-    channels: channel::ChannelMapping,
+    channels: Arc<channel::ChannelMapping>,
 
     /// Runtime-specific state for each Node instance.
     node_infos: RwLock<HashMap<NodeId, NodeInfo>>,
@@ -272,7 +272,7 @@ impl RuntimeProxy {
         let runtime = Arc::new(Runtime {
             configuration,
             terminating: AtomicBool::new(false),
-            channels: channel::ChannelMapping::new(),
+            channels: Arc::new(channel::ChannelMapping::new()),
 
             node_infos: RwLock::new(HashMap::new()),
             node_join_handles: Mutex::new(HashMap::new()),
@@ -638,7 +638,7 @@ impl Runtime {
             }
         }
 
-        self.channels.channel_gc(unvisited)
+        self.channels.gc(unvisited)
     }
 
     /// Returns a clone of the [`Label`] associated with the provided `node_id`, in order to limit
@@ -1027,9 +1027,7 @@ impl Runtime {
     fn channel_close(&self, node_id: NodeId, handle: oak_abi::Handle) -> Result<(), OakStatus> {
         // Remove the ABI handle -> half mapping.
         let half = self.drop_abi_handle(node_id, handle)?;
-        // Drop the half via the `ChannelMapping` object, in case this was the last reference
-        // to the underlying channel.
-        self.channels.drop_half(half);
+        drop(half); // Be explicit: dropped here.
         Ok(())
     }
 
