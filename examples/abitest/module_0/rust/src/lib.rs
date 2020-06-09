@@ -657,6 +657,39 @@ impl OakAbiTestService for FrontendNode {
             };
         }
     }
+    fn slow_unary_method(&mut self, _req: GrpcTestRequest) -> grpc::Result<GrpcTestResponse> {
+        // Perform a slow operation then write an initial response.
+        info!("slow_method first pause...");
+        self.do_something_slow("only");
+        info!("slow_method first pause...done");
+        Ok(GrpcTestResponse {
+            text: "slooow".to_string(),
+        })
+    }
+    fn slow_streaming_method(
+        &mut self,
+        _req: GrpcTestRequest,
+        writer: grpc::ChannelResponseWriter,
+    ) {
+        // Perform a slow operation then write an initial response.
+        info!("slow_method first pause...");
+        self.do_something_slow("first");
+        info!("slow_method first pause...done");
+        let rsp = GrpcTestResponse {
+            text: "slooow".to_string(),
+        };
+        writer
+            .write(&rsp, grpc::WriteMode::KeepOpen)
+            .expect("Failed to write response");
+
+        // Perform a slow operation then write a final response.
+        info!("slow_method second pause...");
+        self.do_something_slow("second");
+        info!("slow_method second pause...done");
+        writer
+            .write(&rsp, grpc::WriteMode::Close)
+            .expect("Failed to write response");
+    }
 }
 
 // Helper for status conversion
@@ -3088,6 +3121,20 @@ impl FrontendNode {
         expect_eq!(Ok(()), oak::channel_close(rh.handle));
         expect_eq!(Ok(()), oak::channel_close(wh.handle));
         Ok(())
+    }
+
+    fn do_something_slow(&self, msg: &str) {
+        let grpc_stub = oak::grpc::client::init(GRPC_CLIENT_ADDRESS)
+            .map(OakAbiTestServiceClient)
+            .unwrap();
+        let req = GrpcTestRequest {
+            method_result: Some(proto::grpc_test_request::MethodResult::OkText(
+                msg.to_string(),
+            )),
+        };
+        debug!("send slow request for {}...", msg);
+        let result = grpc_stub.slow_unary_method(req);
+        debug!("send slow request for {}... done: {:?}", msg, result);
     }
 }
 
