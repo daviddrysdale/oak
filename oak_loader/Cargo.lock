@@ -495,7 +495,7 @@ checksum = "f9d58633299b24b515ac72a3f869f8b91306a3cec616a602843a383acd6f9e97"
 dependencies = [
  "bstr",
  "csv-core",
- "itoa",
+ "itoa 0.4.6",
  "ryu",
  "serde",
 ]
@@ -507,15 +507,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2b2466559f260f48ad25fe6317b3c8dac77b5bdb5763ac7d9d6103530663bc90"
 dependencies = [
  "memchr",
-]
-
-[[package]]
-name = "ct-logs"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8c8e13110a84b6315df212c045be706af261fd364791cad863285439ebba672e"
-dependencies = [
- "sct",
 ]
 
 [[package]]
@@ -1025,7 +1016,7 @@ checksum = "28d569972648b2c512421b5f2a405ad6ac9666547189d0c5477a3f200f3e02f9"
 dependencies = [
  "bytes 0.5.6",
  "fnv",
- "itoa",
+ "itoa 0.4.6",
 ]
 
 [[package]]
@@ -1081,7 +1072,7 @@ dependencies = [
  "http-body 0.3.1",
  "httparse",
  "httpdate",
- "itoa",
+ "itoa 0.4.6",
  "pin-project 1.0.2",
  "socket2",
  "tokio 0.2.23",
@@ -1105,7 +1096,7 @@ dependencies = [
  "http-body 0.4.0",
  "httparse",
  "httpdate",
- "itoa",
+ "itoa 0.4.6",
  "pin-project 1.0.2",
  "socket2",
  "tokio 1.2.0",
@@ -1121,7 +1112,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "37743cc83e8ee85eacfce90f2f4102030d9ff0a95244098d781e9bee4a90abb6"
 dependencies = [
  "bytes 0.5.6",
- "ct-logs 0.7.0",
  "futures-util",
  "hyper 0.13.9",
  "log",
@@ -1129,7 +1119,6 @@ dependencies = [
  "tokio 0.2.23",
  "tokio-rustls 0.14.1",
  "webpki",
- "webpki-roots",
 ]
 
 [[package]]
@@ -1138,7 +1127,7 @@ version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5f9f7a97316d44c0af9b0301e65010573a853a9fc97046d7331d7f6bc0fd5a64"
 dependencies = [
- "ct-logs 0.8.0",
+ "ct-logs",
  "futures-util",
  "hyper 0.14.4",
  "log",
@@ -1147,6 +1136,7 @@ dependencies = [
  "tokio 1.2.0",
  "tokio-rustls 0.22.0",
  "webpki",
+ "webpki-roots 0.21.1",
 ]
 
 [[package]]
@@ -1221,6 +1211,12 @@ name = "itoa"
 version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc6f3ad7b9d11a0c00842ff8de1b60ee58661048eb8049ed33c73594f359d7e6"
+
+[[package]]
+name = "itoa"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1aab8fc367588b89dcee83ab0fd66b72b50b72fa1904d7095045ace2b0c81c35"
 
 [[package]]
 name = "js-sys"
@@ -1640,8 +1636,8 @@ dependencies = [
  "futures-util",
  "hex",
  "http",
- "hyper 0.13.9",
- "hyper-rustls 0.21.0",
+ "hyper 0.14.4",
+ "hyper-rustls 0.22.1",
  "itertools",
  "jsonwebtoken",
  "lazy_static",
@@ -1660,7 +1656,7 @@ dependencies = [
  "regex",
  "reqwest",
  "roughenough",
- "rustls 0.18.1",
+ "rustls 0.19.0",
  "serde",
  "serde_json",
  "sha2",
@@ -1674,7 +1670,7 @@ dependencies = [
  "tink-proto",
  "tink-signature",
  "tokio 0.2.23",
- "tokio-rustls 0.14.1",
+ "tokio-rustls 0.22.0",
  "tonic",
  "wasmi",
 ]
@@ -2228,7 +2224,7 @@ dependencies = [
  "wasm-bindgen-futures",
  "wasm-bindgen-test",
  "web-sys",
- "webpki-roots",
+ "webpki-roots 0.20.0",
  "winreg",
 ]
 
@@ -2522,11 +2518,11 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.60"
+version = "1.0.78"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1500e84d27fe482ed1dc791a56eddc2f230046a040fa908c08bda1d9fb615779"
+checksum = "d23c1ba4cf0efd44be32017709280b32d1cea5c3f1275c3b6d9e8bc54f758085"
 dependencies = [
- "itoa",
+ "itoa 1.0.1",
  "ryu",
  "serde",
 ]
@@ -2538,7 +2534,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "edfa57a7f8d9c1d260a549e7224100f6c43d43f9103e06dd8b4095a9b2b43ce9"
 dependencies = [
  "form_urlencoded",
- "itoa",
+ "itoa 0.4.6",
  "ryu",
  "serde",
 ]
@@ -3709,6 +3705,15 @@ name = "webpki-roots"
 version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0f20dea7535251981a9670857150d571846545088359b28e4951d350bdaf179f"
+dependencies = [
+ "webpki",
+]
+
+[[package]]
+name = "webpki-roots"
+version = "0.21.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aabe153544e473b775453675851ecc86863d2a81d786d741f6b76778f2a48940"
 dependencies = [
  "webpki",
 ]
